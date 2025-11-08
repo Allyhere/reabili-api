@@ -115,9 +115,8 @@ app.post("/login", async (req, res) => {
       const user = result.rows[0];
 
       res.json({
-        message: "Login bem-sucedido",
-        id_user: user.ID_USER,
-        ds_username: user.NM_USER,
+        userId: user.ID_USER,
+        username: user.NM_USER,
       });
     } else {
       res
