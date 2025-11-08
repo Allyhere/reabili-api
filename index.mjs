@@ -137,6 +137,241 @@ app.post("/login", async (req, res) => {
   }
 });
 
+app.get("/article", async (req, res) => {
+  let connection;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    const sql = `
+      SELECT 
+        a.ID_ARTICLE, 
+        a.NM_ARTICLE, 
+        a.T_CCG_USER_ID_USER,
+        r.ID_RELATED,
+        r.DS_TYPE,
+        r.DS_URL,
+        r.DS_CONTENT
+      FROM 
+        T_CCG_ARTICLE a
+      LEFT JOIN 
+        T_CCG_RELATED r ON a.ID_ARTICLE = r.T_CCG_ARTICLE_ID_ARTICLE
+      ORDER BY
+        a.ID_ARTICLE
+    `;
+
+    const result = await connection.execute(sql);
+
+    const articlesMap = new Map();
+
+    for (const row of result.rows) {
+      const articleId = row.ID_ARTICLE;
+
+      if (!articlesMap.has(articleId)) {
+        articlesMap.set(articleId, {
+          id: articleId.toString(),
+          name: row.NM_ARTICLE,
+          userId: row.T_CCG_USER_ID_USER,
+          related: [],
+        });
+      }
+
+      if (row.ID_RELATED) {
+        const article = articlesMap.get(articleId);
+
+        article.related.push({
+          type: row.DS_TYPE,
+          url: row.DS_URL,
+          description: row.NM_ARTICLE,
+          content: row.DS_CONTENT,
+        });
+      }
+    }
+
+    const allArticles = Array.from(articlesMap.values());
+
+    res.json(allArticles);
+  } catch (err) {
+    console.error("Error retrieving articles:", err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
+app.get("/article/:id", async (req, res) => {
+  const { id } = req.params;
+  let connection;
+
+  if (!id) {
+    return res.status(400).json({ message: "Article ID is required." });
+  }
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const sql = `
+      SELECT 
+        a.ID_ARTICLE, 
+        a.NM_ARTICLE, 
+        a.T_CCG_USER_ID_USER,
+        r.ID_RELATED,
+        r.DS_TYPE,
+        r.DS_URL,
+        r.DS_CONTENT
+      FROM 
+        T_CCG_ARTICLE a
+      LEFT JOIN 
+        T_CCG_RELATED r ON a.ID_ARTICLE = r.T_CCG_ARTICLE_ID_ARTICLE
+      WHERE 
+        a.ID_ARTICLE = :id
+    `;
+
+    const result = await connection.execute(sql, { id });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Artigo não encontrado" });
+    }
+
+    const firstRow = result.rows[0];
+    const article = {
+      id: firstRow.ID_ARTICLE.toString(),
+      name: firstRow.NM_ARTICLE,
+      userId: firstRow.T_CCG_USER_ID_USER,
+      related: [],
+    };
+
+    for (const row of result.rows) {
+      if (row.ID_RELATED) {
+        article.related.push({
+          type: row.DS_TYPE,
+          url: row.DS_URL,
+          description: row.NM_ARTICLE,
+          content: row.DS_CONTENT,
+        });
+      }
+    }
+
+    res.json(article);
+  } catch (err) {
+    console.error(`Error retrieving article ${id}:`, err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
+app.post("/article", async (req, res) => {
+  const { name, userId, related } = req.body;
+  let connection;
+
+  if (!name || !userId || !Array.isArray(related)) {
+    return res.status(400).json({
+      message:
+        "Invalid payload. 'name', 'userId', and 'related' (array) are required.",
+    });
+  }
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    connection.autocommit = false;
+
+    const articleSql = `
+      INSERT INTO T_CCG_ARTICLE (ID_ARTICLE, NM_ARTICLE, T_CCG_USER_ID_USER)
+      VALUES (YOUR_ARTICLE_SEQUENCE.NEXTVAL, :name, :userId)
+      RETURNING ID_ARTICLE INTO :outId
+    `;
+
+    const articleBindBinds = {
+      name,
+      userId,
+      outId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+    };
+
+    const articleResult = await connection.execute(
+      articleSql,
+      articleBindBinds
+    );
+    const newArticleId = articleResult.outBinds.outId[0];
+
+    if (related.length > 0) {
+      const relatedSql = `
+        INSERT INTO T_CCG_RELATED (
+          DS_TYPE, 
+          DS_URL, 
+          DS_CONTENT, 
+          T_CCG_ARTICLE_ID_ARTICLE, 
+          ID_USER
+        )
+        VALUES (
+          :type, 
+          :url, 
+          :content, 
+          :articleId, 
+          :userId
+        )
+      `;
+
+      const relatedData = related.map((item) => ({
+        type: item.type,
+        url: item.url || "",
+        content: item.content || "",
+        articleId: newArticleId,
+        userId: userId,
+      }));
+
+      await connection.executeMany(relatedSql, relatedData, {
+        autoCommit: false,
+      });
+    }
+
+    await connection.commit();
+
+    const createdArticle = {
+      id: newArticleId.toString(),
+      name: name,
+      userId: userId,
+      related: related.map((item) => ({
+        type: item.type,
+        url: item.url || "",
+        description: name,
+        content: item.content || "",
+      })),
+    };
+
+    res.status(201).json(createdArticle);
+  } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollErr) {
+        console.error("Error during rollback:", rollErr);
+      }
+    }
+    console.error("Error creating article:", err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
 const port = process.env.PORT || 3001;
 initialize().then(() => {
   app.listen(port, () => {
