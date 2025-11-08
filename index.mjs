@@ -1,8 +1,11 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import oracledb from "oracledb";
 
 dotenv.config();
+oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
+oracledb.autoCommit = true;
 
 import AssistantV2 from "ibm-watson/assistant/v2.js";
 import { IamAuthenticator } from "ibm-watson/auth/index.js";
@@ -10,6 +13,8 @@ import { IamAuthenticator } from "ibm-watson/auth/index.js";
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+/* Watson Assistant setup and routes for /api/session and /api/message */
 
 const assistant = new AssistantV2({
   version: "2021-11-27",
@@ -19,8 +24,24 @@ const assistant = new AssistantV2({
   serviceUrl: process.env.WATSON_ASSISTANT_URL,
 });
 
+const dbConfig = {
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  connectString: `${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_SERVICE}`,
+};
+
 const assistantId = process.env.WATSON_ASSISTANT_ID;
 let sessionId;
+
+async function initialize() {
+  try {
+    await oracledb.createPool(dbConfig);
+    console.log("OracleDB connection pool created successfully.");
+  } catch (err) {
+    console.error("Error creating OracleDB connection pool:", err);
+    process.exit(1);
+  }
+}
 
 app.get("/api/session", async (_, res) => {
   try {
@@ -68,7 +89,59 @@ app.post("/api/message", async (req, res) => {
   }
 });
 
+/* REST API */
+
+app.post("/login", async (req, res) => {
+  const { username, token } = req.body;
+  let connection;
+
+  console.log({ username, token });
+  if (!username || !token) {
+    return res
+      .status(400)
+      .json({ success: false, message: "username and token are required." });
+  }
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `SELECT id_user, DS_username, NM_user 
+       FROM T_CCG_USER 
+       WHERE DS_username = :username AND ds_token = :token`,
+      { username, token }
+    );
+
+    if (result.rows.length > 0) {
+      const user = result.rows[0];
+
+      res.json({
+        message: "Login bem-sucedido",
+        id_user: user.ID_USER,
+        ds_username: user.NM_USER,
+      });
+    } else {
+      res
+        .status(401)
+        .json({ message: "Combinação de usuário e token inválida" });
+    }
+  } catch (err) {
+    console.error("Error during login:", err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
 const port = process.env.PORT || 3001;
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+initialize().then(() => {
+  app.listen(port, () => {
+    console.log(`Server listening at ${port}`);
+  });
 });
