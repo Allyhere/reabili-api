@@ -372,6 +372,70 @@ app.post("/article", async (req, res) => {
   }
 });
 
+app.get("/user/:id", async (req, res) => {
+  const { id } = req.params;
+  let connection;
+
+  if (!id) {
+    return res.status(400).json({ message: "User ID is required." });
+  }
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const sql = `
+      SELECT 
+        u.ID_USER,
+        u.NM_USER,
+        a.ID_ARTICLE,
+        a.NM_ARTICLE
+      FROM 
+        T_CCG_USER u
+      LEFT JOIN 
+        T_CCG_ARTICLE a ON u.ID_USER = a.T_CCG_USER_ID_USER
+      WHERE
+        u.ID_USER = :id
+      ORDER BY
+        a.NM_ARTICLE
+    `;
+
+    const result = await connection.execute(sql, { id });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Usuário não encontrado" });
+    }
+
+    const firstRow = result.rows[0];
+    const userResponse = {
+      userId: firstRow.ID_USER,
+      username: firstRow.NM_USER,
+      articles: [],
+    };
+
+    for (const row of result.rows) {
+      if (row.ID_ARTICLE) {
+        userResponse.articles.push({
+          articleId: row.ID_ARTICLE,
+          name: row.NM_ARTICLE,
+        });
+      }
+    }
+
+    res.json(userResponse);
+  } catch (err) {
+    console.error(`Error retrieving user ${id}:`, err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
 const port = process.env.PORT || 3001;
 initialize().then(() => {
   app.listen(port, () => {
