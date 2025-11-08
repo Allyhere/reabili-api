@@ -1,9 +1,11 @@
-const express = require("express");
-const cors = require("cors");
-require("dotenv").config();
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
 
-const AssistantV2 = require("ibm-watson/assistant/v2");
-const { IamAuthenticator } = require("ibm-watson/auth");
+dotenv.config();
+
+import AssistantV2 from "ibm-watson/assistant/v2.js";
+import { IamAuthenticator } from "ibm-watson/auth/index.js";
 
 const app = express();
 app.use(express.json());
