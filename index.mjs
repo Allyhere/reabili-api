@@ -95,7 +95,6 @@ app.post("/login", async (req, res) => {
   const { username, token } = req.body;
   let connection;
 
-  console.log({ username, token });
   if (!username || !token) {
     return res
       .status(400)
