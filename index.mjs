@@ -495,6 +495,7 @@ app.put("/user/:id", async (req, res) => {
   let connection;
 
   const updateFields = [];
+
   const bindData = {};
 
   if (username !== undefined) {
@@ -516,6 +517,7 @@ app.put("/user/:id", async (req, res) => {
         "Nenhum campo para atualizar foi fornecido (username, name, token).",
     });
   }
+
   bindData.id = id;
 
   const sql = `
@@ -527,7 +529,9 @@ app.put("/user/:id", async (req, res) => {
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    const result = await connection.execute(sql, bindData);
+    const result = await connection.execute(sql, bindData, {
+      autoCommit: true,
+    });
 
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: "Usuário não encontrado" });
