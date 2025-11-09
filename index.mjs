@@ -439,6 +439,7 @@ app.get("/user/:id", async (req, res) => {
     const sql = `
       SELECT 
         u.ID_USER,
+        u.DS_USERNAME,
         u.NM_USER,
         a.ID_ARTICLE,
         a.NM_ARTICLE
@@ -462,6 +463,7 @@ app.get("/user/:id", async (req, res) => {
     const userResponse = {
       userId: firstRow.ID_USER,
       username: firstRow.NM_USER,
+      usernameId: firstRow.DS_USERNAME,
       articles: [],
     };
 
@@ -495,7 +497,10 @@ app.put("/user/:id", async (req, res) => {
   let connection;
 
   const updateFields = [];
-
+  // Usamos um objeto para os binds, mas com 'bindData.id = id'
+  // é mais seguro usar um array para os binds na query
+  // e garantir a ordem, ou usar um objeto de forma consistente.
+  // Vamos manter seu estilo com objeto, pois é mais claro.
   const bindData = {};
 
   if (username !== undefined) {
@@ -518,7 +523,13 @@ app.put("/user/:id", async (req, res) => {
     });
   }
 
-  bindData.id = id;
+  const numericId = Number(id);
+  if (isNaN(numericId)) {
+    return res
+      .status(400)
+      .json({ message: "ID de usuário inválido. Deve ser um número." });
+  }
+  bindData.id = numericId;
 
   const sql = `
     UPDATE T_CCG_USER
@@ -529,13 +540,13 @@ app.put("/user/:id", async (req, res) => {
   try {
     connection = await oracledb.getConnection(dbConfig);
 
-    const result = await connection.execute(sql, bindData, {
-      autoCommit: true,
-    });
+    const result = await connection.execute(sql, bindData);
 
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: "Usuário não encontrado" });
     }
+
+    await connection.commit();
 
     res.status(200).json({ message: "Usuário atualizado com sucesso" });
   } catch (err) {
