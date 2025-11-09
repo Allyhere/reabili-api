@@ -117,6 +117,7 @@ app.post("/login", async (req, res) => {
       res.json({
         userId: user.ID_USER,
         username: user.NM_USER,
+        usernameId: user.DS_USERNAME,
       });
     } else {
       res
