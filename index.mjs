@@ -372,6 +372,59 @@ app.post("/article", async (req, res) => {
   }
 });
 
+app.delete("/article/:id", async (req, res) => {
+  const { id } = req.params;
+  let connection;
+
+  if (!id) {
+    return res.status(400).json({ message: "Article ID is required." });
+  }
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    connection.autocommit = false;
+
+    const relatedSql = `
+      DELETE FROM T_CCG_RELATED
+      WHERE T_CCG_ARTICLE_ID_ARTICLE = :id
+    `;
+    await connection.execute(relatedSql, { id });
+
+    const articleSql = `
+      DELETE FROM T_CCG_ARTICLE
+      WHERE ID_ARTICLE = :id
+    `;
+    const result = await connection.execute(articleSql, { id });
+
+    if (result.rowsAffected === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Artigo não encontrado" });
+    }
+
+    await connection.commit();
+
+    res.status(200).json({ message: "Artigo deletado com sucesso" });
+  } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollErr) {
+        console.error("Error during rollback:", rollErr);
+      }
+    }
+    console.error(`Error deleting article ${id}:`, err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
 app.get("/user/:id", async (req, res) => {
   const { id } = req.params;
   let connection;
@@ -424,6 +477,65 @@ app.get("/user/:id", async (req, res) => {
     res.json(userResponse);
   } catch (err) {
     console.error(`Error retrieving user ${id}:`, err);
+    res.status(500).send("Erro de servidor");
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error("Error closing connection:", err);
+      }
+    }
+  }
+});
+
+app.put("/user/:id", async (req, res) => {
+  const { id } = req.params;
+  const { username, name, token } = req.body;
+  let connection;
+
+  const updateFields = [];
+  const bindData = {};
+
+  if (username !== undefined) {
+    updateFields.push("DS_USERNAME = :username");
+    bindData.username = username;
+  }
+  if (name !== undefined) {
+    updateFields.push("NM_USER = :name");
+    bindData.name = name;
+  }
+  if (token !== undefined) {
+    updateFields.push("DS_TOKEN = :token");
+    bindData.token = token;
+  }
+
+  if (updateFields.length === 0) {
+    return res.status(400).json({
+      message:
+        "Nenhum campo para atualizar foi fornecido (username, name, token).",
+    });
+  }
+  bindData.id = id;
+
+  const sql = `
+    UPDATE T_CCG_USER
+    SET ${updateFields.join(", ")}
+    WHERE ID_USER = :id
+  `;
+
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(sql, bindData);
+
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ message: "Usuário não encontrado" });
+    }
+
+    res.status(200).json({ message: "Usuário atualizado com sucesso" });
+  } catch (err) {
+    console.error(`Error updating user ${id}:`, err);
     res.status(500).send("Erro de servidor");
   } finally {
     if (connection) {
